@@ -24,9 +24,8 @@ Lean: B. Pattern grid read from `patterns.txt`/`meta.json`, left column = orders
 
 - Q2: both `--order A-B` and `--pattern N`.
 - Q3: exports inside the song out dir (`out/song/patterns/pNN/`, `out/song/orders/oNN-oMM/`).
-- Q1: user leans Electron direct instead of web. Rationale web was only "less setup"; for this tool Electron wins: double-click app, no terminal, spawns `ft2-clone --extract` via child_process, native folder dialogs, open in Finder, and native drag of stem files straight into Bitwig (`webContents.startDrag`), which a browser cannot do. Reuse `tools/ado` scaffold (electron-vite + React 19 + Tailwind 4 + @almst/ui + Jotai). Tauri 2 (as in soundfuzz) is lighter but needs Rust sidecar config for the binary; Bun-native shells (Electrobun) too immature. Pending user confirm.
+- Q1: user leans Electron direct instead of web. Rationale web was only "less setup"; for this tool Electron wins: double-click app, no terminal, spawns `ft2-clone --extract` via child_process, native folder dialogs, open in Finder, and native drag of stem files straight into Bitwig (`webContents.startDrag`), which a browser cannot do. Reuse `tools/ado` scaffold (electron-vite + React 19 + Tailwind 4 + @almst/ui + Jotai). Tauri 2 (as in soundfuzz) is lighter but needs Rust sidecar config for the binary; Bun-native shells (Electrobun) too immature. Confirmed by user: Electron, same stack and UI elements as the other zik Electron apps (`tools/ado`), reuse `@almst/ui` so it keeps the same look.
 
 ## Unresolved questions
 
-- Q1: confirm Electron direct, scaffold copied from `tools/ado`.
 - Q4: app name/dir, e.g. `tools/fastxtract`.

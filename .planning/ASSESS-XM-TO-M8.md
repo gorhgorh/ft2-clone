@@ -1,6 +1,6 @@
 # ASSESS: XM to Dirtywave M8 converter (2026-10-09)
 
-Status: assessment only, nothing started. Companion to `PLAN-XM-EXTRACT*.md`.
+Status: v1 pipeline done 2026-10-09 in `tools/xm2m8` (zik repo). Spike + convert + analyze commands, BASTARD BOY converts (219 phrases, 107 chains, 27 song rows, 82 instruments, round trip verified). Awaiting device test on M8 Model:02 fw 6.5.0. Companion to `PLAN-XM-EXTRACT*.md`.
 
 ## M8 target facts (m8-files / m8-file-parser crates, manual v6)
 
@@ -95,7 +95,15 @@ Not 1:1. Tick-accurate volume ramps and multi-effect per tick would need M8 tabl
 - Q3: Rust + `m8-file-parser` crate. Reason: writer + remapper exist for fw 4-6, format drift tracked upstream; TS port would own every offset table per firmware. Binary format is the main risk, so lean on the crate. CLI binary, Electron GUI spawns it later like `ft2-clone --extract`. Fallback if crate lacks fw 6 write: fork it, still Rust.
 - Q4: both policies, flag `--channels merge|drop|auto`. `auto` = merge zero-overlap pairs first, then drop least busy; always print the overlap matrix + what was merged/dropped.
 
-## Unresolved
+## Done (2026-10-09)
 
-- Exact firmware version + template `.m8s` from device.
-- Verify `m8-file-parser` writes fw 6 songs (check at kickoff, before any mapping code).
+- fw confirmed 6.5.0; parser fixture `EMPTY65.m8s` is a 6.5.0 blank song, bundled as template.
+- `m8-file-parser` (git 08d68bc) writes 6.x songs; round trip verified.
+- `patterns.json` already exported by `--extract` (GUI session added it), no C work needed.
+- Rust crate `tools/xm2m8`: extract loader, channel plan (auto/merge/drop), FX mapping, sample prep (16-bit, loop trim, pingpong unroll), phrase/chain dedup + packing, grooves from speed, writer + re-read check, report.json. See its README for the mapping table and device checklist.
+
+## Next
+
+- Device test: pitch base / note offset, velocity scale, KIL as key off, HOP placement, PBN scaling, loop clicks, low sample rates.
+- C export: envelope points, auto-vibrato, sample keymap (then envelope fit + multi-sample split in xm2m8).
+- Transpose-aware phrase dedup; order-range export for big modules.

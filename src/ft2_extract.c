@@ -1493,6 +1493,25 @@ static void writePatternsJson(const char *path)
 	fclose(f);
 }
 
+// notes.json: the note events behind the MIDI files, in frames, for DAW project builders
+static void writeNotesJson(const char *path, const noteList_t *notes, uint32_t rate)
+{
+	FILE *f = fopen(path, "w");
+	if (f == NULL)
+		return;
+
+	fprintf(f, "{\n  \"rate\": %u,\n  \"notes\": [\n", rate);
+	for (int32_t i = 0; i < notes->n; i++)
+	{
+		const noteEvent_t *e = &notes->v[i];
+		fprintf(f, "    { \"channel\": %d, \"instr\": %d, \"key\": %d, \"vel\": %d, \"startFrame\": %llu, \"endFrame\": %llu }%s\n",
+			e->ch + 1, e->instr, e->note, e->vel, (unsigned long long)e->startFrame, (unsigned long long)e->endFrame,
+			(i + 1 < notes->n) ? "," : "");
+	}
+	fprintf(f, "  ]\n}\n");
+	fclose(f);
+}
+
 static void writeTimelineJson(const char *path, const timeline_t *t)
 {
 	FILE *f = fopen(path, "w");
@@ -1945,6 +1964,9 @@ int extractMain(int argc, char **argv)
 
 	joinPath(path, sizeof (path), o.outDir, "patterns.json");
 	writePatternsJson(path);
+
+	joinPath(path, sizeof (path), o.outDir, "notes.json");
+	writeNotesJson(path, &notes, o.rate);
 
 	joinPath(path, sizeof (path), o.outDir, "timeline.json");
 	writeTimelineJson(path, &t);

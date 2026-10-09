@@ -40,6 +40,7 @@ Needs SDL2 (Homebrew `sdl2` on macOS is fine; the stock `make-macos.sh` expects 
 out/song/
   meta.json          song, tempo, orders, instruments, samples, channel usage, stem index
   timeline.json      every pattern row the replayer read: order, pattern, row, frame, seconds, speed, bpm
+  notes.json         the note events behind the MIDI files: channel (1-based), instr, MIDI key, vel, startFrame, endFrame
   patterns.txt       FT2-style text dump of every used pattern
   patterns.json      same as cells: [note, instr, vol, efx, efxData] raw XM values + FT2 display text, null when empty
   stems/mix.wav                       full mix, same as the GUI "Render to WAV"

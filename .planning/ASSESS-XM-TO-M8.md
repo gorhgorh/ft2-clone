@@ -88,9 +88,14 @@ Not 1:1. Tick-accurate volume ramps and multi-effect per tick would need M8 tabl
 - Phrase/chain budget on big modules: hard wall. Order-range export is the escape hatch.
 - Pitch base of sampler for arbitrary wav sample rates: unknown, test first.
 
-## Unresolved questions
+## Decisions (2026-10-09)
 
-- Q1: own an M8? Model/firmware version (decides file version, 4.x vs 6.x).
-- Q2: goal = faithful playback, or a starting point to rework in M8 (decides how much FX/envelope fidelity matters)?
-- Q3: converter language: Rust + `m8-file-parser` (lean) or TS port of offsets?
-- Q4: channels > 8 policy: merge non-overlapping, drop least busy, or ask per song?
+- Q1: user owns M8 Model:02, recent firmware (likely 6.x). Exact version to confirm (Settings screen, or header of any `.m8s` on the SD). Save one blank song from the device as the template.
+- Q2: as faithful as possible, differences accepted. So: invest in FX mapping + envelope fit + loop alignment; skip tables (TBL/TIC) emulation in v1.
+- Q3: Rust + `m8-file-parser` crate. Reason: writer + remapper exist for fw 4-6, format drift tracked upstream; TS port would own every offset table per firmware. Binary format is the main risk, so lean on the crate. CLI binary, Electron GUI spawns it later like `ft2-clone --extract`. Fallback if crate lacks fw 6 write: fork it, still Rust.
+- Q4: both policies, flag `--channels merge|drop|auto`. `auto` = merge zero-overlap pairs first, then drop least busy; always print the overlap matrix + what was merged/dropped.
+
+## Unresolved
+
+- Exact firmware version + template `.m8s` from device.
+- Verify `m8-file-parser` writes fw 6 songs (check at kickoff, before any mapping code).

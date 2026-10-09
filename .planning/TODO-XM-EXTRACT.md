@@ -12,4 +12,5 @@ Deferred items from 2026-10-09 planning. See `PLAN-XM-EXTRACT.md`.
 - [ ] Output size: ~23 MB/min per float stereo stem. Options: per-stem trimming of leading/trailing silence with offset in meta.json, or mono stems when pan is centered.
 - [ ] Tone-portamento notes (3xx, 5xx, vol Fx) are emitted as new MIDI notes; FT2 slides the pitch without retrigger.
 - [x] Pattern-level export (`--order A-B`, `--pattern N`, `--tail`, `--carry-voices`) done 2026-10-09.
-- [ ] Small GUI (`tools/fastxtract`, Electron) for preview + export by pattern / channel / instrument. See `PLAN-XM-EXTRACT-GUI.md`.
+- [x] Small GUI (`tools/fastxtract`, Electron) first version 2026-10-09.
+- [ ] fastxtract: bundle ft2-clone in the packaged app (electron-builder extraResources), waveform in preview bar, cancel running export, remember last module for preview + export by pattern / channel / instrument. See `PLAN-XM-EXTRACT-GUI.md`.

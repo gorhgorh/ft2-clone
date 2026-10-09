@@ -1,6 +1,6 @@
 # PLAN: pattern-level export + small GUI (draft, 2026-10-09)
 
-Status: step 1 (CLI) done 2026-10-09, step 2 (Electron app `tools/fastxtract`) in progress. User ask: small GUI, preview a pattern, export it as whole / per channel / per instrument.
+Status: step 1 (CLI) and step 2 (Electron app `tools/fastxtract`, zik commit) done 2026-10-09. Left: packaging the binary with electron-builder extraResources, waveform display, cancel button for long exports. User ask: small GUI, preview a pattern, export it as whole / per channel / per instrument.
 
 ## Step 1: CLI first (any GUI needs it)
 

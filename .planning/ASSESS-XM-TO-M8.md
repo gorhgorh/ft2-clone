@@ -102,6 +102,11 @@ Not 1:1. Tick-accurate volume ramps and multi-effect per tick would need M8 tabl
 - `patterns.json` already exported by `--extract` (GUI session added it), no C work needed.
 - Rust crate `tools/xm2m8`: extract loader, channel plan (auto/merge/drop), FX mapping, sample prep (16-bit, loop trim, pingpong unroll), phrase/chain dedup + packing, grooves from speed, writer + re-read check, report.json. See its README for the mapping table and device checklist.
 
+## Device test 1 (2026-10-09, M8 Model:02 fw 6.5.0, BASTARD BOY)
+
+- Loads and plays. Pitch OK (note offset -13 confirmed). Velocity scale OK. Tempo/groove feel OK.
+- Not yet checked: KIL 00 as key off (hanging notes?), loop clicks, HOP on short patterns, PBN depth.
+
 ## Next
 
 - Device test: pitch base / note offset, velocity scale, KIL as key off, HOP placement, PBN scaling, loop clicks, low sample rates.

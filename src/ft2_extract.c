@@ -780,7 +780,7 @@ static void startHeadlessPlayback(const extractOpts_t *o)
 	resetChannels();
 	resetReplayerState();
 	setNewAudioFreq(o->rate);
-	setAudioAmp(o->amp, 256, o->bits == 32);
+	setAudioAmp(o->amp, 256, true); // always float normalization: 16-bit conversion is done in writeStemFrames
 
 	stopVoices();
 	song.globalVolume = 64;
@@ -1720,7 +1720,7 @@ static bool setupHeadlessEngine(const extractOpts_t *o)
 
 	audioSetInterpolationType(config.interpolation);
 	audioSetVolRamp(true);
-	setAudioAmp(o->amp, 256, o->bits == 32);
+	setAudioAmp(o->amp, 256, true); // always float normalization: 16-bit conversion is done in writeStemFrames
 
 	if (!allocateMixBuffers())
 	{

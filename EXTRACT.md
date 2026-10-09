@@ -83,4 +83,6 @@ Notes are placed by absolute time at one tempo: `24 * BPM / (rowsPerBeat * speed
 - `src/ft2_main.c`: two-line hook before SDL video init.
 - `src/ft2_replayer.c`: `replayerPatternEnds` counter, bumped when a pattern ends (wrap, `Dxx`, `Bxx`); the range modes stop on it.
 
+`tools/fastxtract` (Electron app) drives this CLI and can also build a `.dawproject` from an export dir (`bun run dawproject <exportDir>`), which Bitwig, Studio One and Cubase open directly.
+
 Deferred ideas live in `.planning/TODO-XM-EXTRACT.md`.

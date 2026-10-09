@@ -1557,6 +1557,18 @@ static bool instrSamplesExported(const extractOpts_t *o, const usage_t *u, int32
 	return o->samples && (o->allSamples || instrUsed(u, i));
 }
 
+// FT2 envelope: up to 12 points (tick, value), flags bit0 on, bit1 sustain, bit2 loop. Point indices are 0-based.
+static void fputEnvelopeJson(FILE *f, const int16_t points[12][2], uint8_t length, uint8_t sustain, uint8_t loopStart, uint8_t loopEnd, uint8_t flags)
+{
+	fprintf(f, "{ \"on\": %s, \"sustain\": %s, \"loop\": %s, \"sustainPoint\": %d, \"loopStart\": %d, \"loopEnd\": %d, \"points\": [",
+		(flags & ENV_ENABLED) ? "true" : "false", (flags & ENV_SUSTAIN) ? "true" : "false", (flags & ENV_LOOP) ? "true" : "false",
+		sustain, loopStart, loopEnd);
+	const int32_t n = (length > 12) ? 12 : length;
+	for (int32_t k = 0; k < n; k++)
+		fprintf(f, "%s[%d,%d]", (k > 0) ? "," : "", points[k][0], points[k][1]);
+	fprintf(f, "] }");
+}
+
 static void writeMetaJson(const char *path, const extractOpts_t *o, const timeline_t *t, const usage_t *u,
 	int32_t rowsPerBeat, const char *stemIndexJson, int32_t numStems)
 {
@@ -1633,6 +1645,15 @@ static void writeMetaJson(const char *path, const extractOpts_t *o, const timeli
 		fprintf(f, ", \"used\": %s, \"fadeout\": %d, \"volEnv\": %s, \"panEnv\": %s, \"autoVib\": { \"type\": %d, \"sweep\": %d, \"depth\": %d, \"rate\": %d },\n",
 			instrUsed(u, i) ? "true" : "false", ins->fadeout, (ins->volEnvFlags & 1) ? "true" : "false", (ins->panEnvFlags & 1) ? "true" : "false",
 			ins->autoVibType, ins->autoVibSweep, ins->autoVibDepth, ins->autoVibRate);
+
+		fprintf(f, "      \"volEnvelope\": ");
+		fputEnvelopeJson(f, ins->volEnvPoints, ins->volEnvLength, ins->volEnvSustain, ins->volEnvLoopStart, ins->volEnvLoopEnd, ins->volEnvFlags);
+		fprintf(f, ",\n      \"panEnvelope\": ");
+		fputEnvelopeJson(f, ins->panEnvPoints, ins->panEnvLength, ins->panEnvSustain, ins->panEnvLoopStart, ins->panEnvLoopEnd, ins->panEnvFlags);
+		fprintf(f, ",\n      \"noteSampleMap\": [");
+		for (int32_t n = 0; n < 96; n++)
+			fprintf(f, "%s%d", (n > 0) ? "," : "", ins->note2SampleLUT[n] + 1);
+		fprintf(f, "],\n");
 
 		fprintf(f, "      \"usedOnChannels\": [");
 		bool firstCh = true;

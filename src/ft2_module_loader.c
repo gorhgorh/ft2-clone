@@ -4,6 +4,7 @@
 #endif
 
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdbool.h>
 #ifndef _WIN32
@@ -74,7 +75,59 @@ static volatile bool musicIsLoading, moduleLoaded, moduleFailedToLoad;
 static SDL_Thread *thread;
 static uint8_t oldPlayMode;
 static void setupLoadedModule(void);
+static void setupLoadedModuleCore(void);
+static void removeOverflownPatternData(void);
 static void freeTmpModule(void);
+static void clearTmpModule(void);
+static bool loadModuleFromFile(FILE *f);
+
+static void stderrLoaderMsgBox(const char *fmt, ...)
+{
+	va_list args;
+
+	va_start(args, fmt);
+	fprintf(stderr, "load error: ");
+	vfprintf(stderr, fmt, args);
+	fprintf(stderr, "\n");
+	va_end(args);
+}
+
+static int16_t stderrLoaderSysReq(int16_t type, const char *headline, const char *text, void (*checkBoxCallback)(void))
+{
+	fprintf(stderr, "%s: %s\n", headline, text);
+	return 0;
+
+	(void)type;
+	(void)checkBoxCallback;
+}
+
+bool loadModuleHeadless(const char *path)
+{
+	loaderMsgBox = stderrLoaderMsgBox;
+	loaderSysReq = stderrLoaderSysReq;
+
+	clearTmpModule();
+	moduleLoaded = moduleFailedToLoad = false;
+
+	FILE *f = fopen(path, "rb");
+	if (f == NULL)
+	{
+		fprintf(stderr, "load error: can't open \"%s\"\n", path);
+		return false;
+	}
+
+	const bool wasLoaded = loadModuleFromFile(f);
+	fclose(f);
+
+	if (!wasLoaded)
+	{
+		freeTmpModule();
+		return false;
+	}
+
+	setupLoadedModuleCore();
+	return true;
+}
 
 // Crude module detection routine. These aren't always accurate detections!
 static int8_t detectModule(FILE *f)
@@ -170,25 +223,8 @@ static int8_t detectModule(FILE *f)
 	return FORMAT_UNKNOWN;
 }
 
-static bool doLoadMusic(bool externalThreadFlag)
+static bool loadModuleFromFile(FILE *f)
 {
-	// setup message box functions
-	loaderMsgBox = externalThreadFlag ? myLoaderMsgBoxThreadSafe : myLoaderMsgBox;
-	loaderSysReq = externalThreadFlag ? okBoxThreadSafe : okBox;
-
-	if (editor.tmpFilenameU == NULL)
-	{
-		loaderMsgBox("Generic memory fault during loading!");
-		goto loadError;
-	}
-
-	FILE *f = UNICHAR_FOPEN(editor.tmpFilenameU, "rb");
-	if (f == NULL)
-	{
-		loaderMsgBox("General I/O error during loading! Is the file in use? Does it exist?");
-		goto loadError;
-	}
-
 	int8_t format = detectModule(f);
 	fseek(f, 0, SEEK_END);
 	uint32_t filesize = ftell(f);
@@ -211,6 +247,30 @@ static bool doLoadMusic(bool externalThreadFlag)
 			loaderMsgBox("This file is not a supported module!");
 		break;
 	}
+
+	return wasLoaded;
+}
+
+static bool doLoadMusic(bool externalThreadFlag)
+{
+	// setup message box functions
+	loaderMsgBox = externalThreadFlag ? myLoaderMsgBoxThreadSafe : myLoaderMsgBox;
+	loaderSysReq = externalThreadFlag ? okBoxThreadSafe : okBox;
+
+	if (editor.tmpFilenameU == NULL)
+	{
+		loaderMsgBox("Generic memory fault during loading!");
+		goto loadError;
+	}
+
+	FILE *f = UNICHAR_FOPEN(editor.tmpFilenameU, "rb");
+	if (f == NULL)
+	{
+		loaderMsgBox("General I/O error during loading! Is the file in use? Does it exist?");
+		goto loadError;
+	}
+
+	const bool wasLoaded = loadModuleFromFile(f);
 	fclose(f);
 
 	if (!wasLoaded)
@@ -376,10 +436,9 @@ void clearUnusedChannels(note_t *pattPtr, int16_t numRows, int32_t numChannels)
 }
 
 // called from input/video thread after the module was done loading
-static void setupLoadedModule(void)
+// GUI-free part of module setup (also used by headless extraction)
+static void setupLoadedModuleCore(void)
 {
-	lockMixerCallback();
-
 	freeAllInstr();
 	freeAllPatterns();
 
@@ -444,7 +503,17 @@ static void setupLoadedModule(void)
 		song.songLoopStart = 0;
 
 	song.globalVolume = 64;
+	removeOverflownPatternData();
 
+	resetChannels();
+	setSongPos(0, 0, RESET_SONG_TICK);
+	setMixerBPM(song.BPM);
+
+	setLinearPeriods(tmpLinearPeriodsFlag);
+}
+
+static void removeOverflownPatternData(void)
+{
 	// remove overflown stuff in pattern data (FT2 doesn't do this)
 	for (int32_t i = 0; i < MAX_PATTERNS; i++)
 	{
@@ -473,21 +542,22 @@ static void setupLoadedModule(void)
 			}
 		}
 	}
+}
+
+static void setupLoadedModule(void)
+{
+	lockMixerCallback();
+
+	setupLoadedModuleCore();
 
 	setScrollBarEnd(SB_POS_ED, (song.songLength - 1) + 5);
 	setScrollBarPos(SB_POS_ED, 0, DONT_TRIGGER_CALLBACK);
-
-	resetChannels();
-	setSongPos(0, 0, RESET_SONG_TICK);
-	setMixerBPM(song.BPM);
 
 	editor.tmpPattern = editor.editPattern; // set kludge variable
 	editor.BPM = song.BPM;
 	editor.speed = song.speed;
 	editor.tick = song.tick;
 	editor.globalVolume = song.globalVolume;
-
-	setLinearPeriods(tmpLinearPeriodsFlag);
 
 	unlockMixerCallback();
 

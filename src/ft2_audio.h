@@ -62,6 +62,7 @@ typedef struct
 	const int16_t *base16, *revBase16;
 	bool active, samplingBackwards, isFadeOutVoice, hasLooped;
 	uint8_t scopeVolume, mixFuncOffset, panning, loopType;
+	uint8_t instrTag; // instrument number (1..128) that triggered this voice, 0 if none (for stem extraction)
 	int32_t position, sampleEnd, loopStart, loopLength;
 	uint32_t volumeRampLength;
 	uint64_t positionFrac, delta, scopeDelta;
@@ -148,6 +149,11 @@ void unlockMixerCallback(void);
 void resetRampVolumes(void);
 void updateVoices(void);
 void mixReplayerTickToBuffer(uint32_t samplesToMix, void *stream, uint8_t bitDepth);
+
+// headless stem extraction (ft2_extract.c)
+typedef void (*stemSinkFunc)(int32_t chNum, uint8_t instrTag, const float *fL, const float *fR, uint32_t numSamples, void *ctx);
+bool allocateMixBuffers(void);
+void mixReplayerTickToStems(uint32_t samplesToMix, stemSinkFunc sink, void *ctx);
 
 // in ft2_audio.c
 extern audio_t audio;

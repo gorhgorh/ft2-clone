@@ -331,6 +331,20 @@ void resetRampVolumes(void)
 	}
 }
 
+static uint8_t instrPtrToNum(const instr_t *ins)
+{
+	if (ins == NULL)
+		return 0;
+
+	for (int32_t i = 1; i <= MAX_INST; i++)
+	{
+		if (instr[i] == ins)
+			return (uint8_t)i;
+	}
+
+	return 0;
+}
+
 void updateVoices(void)
 {
 	channel_t *ch = channel;
@@ -369,7 +383,10 @@ void updateVoices(void)
 		}
 
 		if (status & CS_TRIGGER_VOICE)
+		{
+			v->instrTag = instrPtrToNum(ch->instrPtr);
 			voiceTrigger(i, ch->smpPtr, ch->smpStartPos);
+		}
 	}
 }
 
@@ -522,6 +539,56 @@ static void doChannelMixing(int32_t bufferPosition, int32_t samplesToMix)
 
 		if (r->active) // volume ramp fadeout-voice
 			mixFuncTab[mixOffsetBias + r->mixFuncOffset](r, bufferPosition, samplesToMix);
+	}
+}
+
+// used for headless stem extraction: mixes every voice separately and hands each one to the sink
+static void flushVoiceToSink(int32_t chNum, uint8_t instrTag, uint32_t samplesToMix, stemSinkFunc sink, void *ctx)
+{
+	float *fL = audio.fMixBufferL;
+	float *fR = audio.fMixBufferR;
+
+	for (uint32_t i = 0; i < samplesToMix; i++)
+	{
+		fL[i] *= fAudioNormalizeMul;
+		fR[i] *= fAudioNormalizeMul;
+	}
+
+	if (sink != NULL)
+		sink(chNum, instrTag, fL, fR, samplesToMix, ctx);
+
+	memset(fL, 0, samplesToMix * sizeof (float));
+	memset(fR, 0, samplesToMix * sizeof (float));
+}
+
+void mixReplayerTickToStems(uint32_t samplesToMix, stemSinkFunc sink, void *ctx)
+{
+	voice_t *v = voice; // normal voices
+	voice_t *r = &voice[MAX_CHANNELS]; // volume ramp fadeout-voices
+
+	const int32_t mixOffsetBias = 3 * NUM_INTERPOLATORS * 2;
+
+	for (int32_t i = 0; i < song.numChannels; i++, v++, r++)
+	{
+		if (v->active)
+		{
+			const bool volRampFlag = (v->volumeRampLength > 0);
+			if (!volRampFlag && v->fCurrVolumeL == 0.0f && v->fCurrVolumeR == 0.0f)
+			{
+				updateSamplingPosition(v, samplesToMix);
+			}
+			else
+			{
+				mixFuncTab[((int32_t)volRampFlag * mixOffsetBias) + v->mixFuncOffset](v, 0, samplesToMix);
+				flushVoiceToSink(i, v->instrTag, samplesToMix, sink, ctx);
+			}
+		}
+
+		if (r->active)
+		{
+			mixFuncTab[mixOffsetBias + r->mixFuncOffset](r, 0, samplesToMix);
+			flushVoiceToSink(i, r->instrTag, samplesToMix, sink, ctx);
+		}
 	}
 }
 
@@ -936,6 +1003,11 @@ static bool setupAudioBuffers(void)
 		return false;
 
 	return true;
+}
+
+bool allocateMixBuffers(void)
+{
+	return setupAudioBuffers();
 }
 
 static void freeAudioBuffers(void)

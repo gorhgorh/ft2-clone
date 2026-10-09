@@ -36,6 +36,7 @@
 #include "ft2_events.h"
 #include "ft2_bmp.h"
 #include "ft2_structs.h"
+#include "ft2_extract.h"
 #include "ft2_hpc.h"
 #include "ft2_smpfx.h"
 #include "mixer/ft2_windowed_sinc.h"
@@ -87,6 +88,9 @@ int main(int argc, char *argv[])
 
 	initializeVars();
 	setupCrashHandler();
+
+	if (argc >= 3 && strcmp(argv[1], "--extract") == 0)
+		return extractMain(argc, argv); // headless, never opens a window
 
 	// on Windows and macOS, test what version SDL2.DLL is (against library version used in compilation)
 #if defined _WIN32 || defined __APPLE__

@@ -23,3 +23,8 @@ vs2026_project/ft2-clone/x64/*
 *.recipe
 *.iobj
 *.enc
+
+mods/
+build/
+out/
+release/other/ft2-clone

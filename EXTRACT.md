@@ -41,6 +41,7 @@ out/song/
   meta.json          song, tempo, orders, instruments, samples, channel usage, stem index
   timeline.json      every pattern row the replayer read: order, pattern, row, frame, seconds, speed, bpm
   patterns.txt       FT2-style text dump of every used pattern
+  patterns.json      same as cells: [note, instr, vol, efx, efxData] raw XM values + FT2 display text, null when empty
   stems/mix.wav                       full mix, same as the GUI "Render to WAV"
   stems/channels/ch-NN.wav            one per channel
   stems/instruments/iNNN-name.wav     one per instrument, across all channels

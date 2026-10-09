@@ -1435,6 +1435,64 @@ static void writePatternsText(const char *path)
 	fclose(f);
 }
 
+/*
+** patterns.json: every used pattern as rows of cells, for GUIs.
+** Cell = [note, instr, vol, efx, efxData] raw XM values (note 1..96, 97 = key off,
+** 0 = none), plus "text" with the FT2 display string. Empty cells are null.
+*/
+static void writePatternsJson(const char *path)
+{
+	FILE *f = fopen(path, "w");
+	if (f == NULL)
+		return;
+
+	bool used[MAX_PATTERNS] = { false };
+	for (int32_t i = 0; i < song.songLength; i++)
+		used[song.orders[i]] = true;
+
+	char cell[16];
+	bool firstPatt = true;
+	fprintf(f, "{\n  \"numChannels\": %d,\n  \"patterns\": [\n", song.numChannels);
+	for (int32_t pn = 0; pn < MAX_PATTERNS; pn++)
+	{
+		if (!used[pn])
+			continue;
+
+		fprintf(f, "%s    { \"index\": %d, \"rows\": [\n", firstPatt ? "" : ",\n", pn);
+		firstPatt = false;
+
+		for (int32_t row = 0; row < patternNumRows[pn]; row++)
+		{
+			fprintf(f, "      [");
+			for (int32_t ch = 0; ch < song.numChannels; ch++)
+			{
+				static const note_t empty = { 0, 0, 0, 0, 0 };
+				const note_t *p = pattern[pn] ? &pattern[pn][(row * MAX_CHANNELS) + ch] : &empty;
+				const bool isEmpty = (p->note == 0 && p->instr == 0 && p->vol == 0 && p->efx == 0 && p->efxData == 0);
+
+				if (ch > 0)
+					fprintf(f, ", ");
+
+				if (isEmpty)
+				{
+					fprintf(f, "null");
+					continue;
+				}
+
+				formatCell(p, cell);
+				fprintf(f, "{ \"note\": %d, \"instr\": %d, \"vol\": %d, \"efx\": %d, \"efxData\": %d, \"text\": ",
+					p->note, p->instr, p->vol, p->efx, p->efxData);
+				fputJsonString(f, cell);
+				fprintf(f, " }");
+			}
+			fprintf(f, "]%s\n", (row + 1 < patternNumRows[pn]) ? "," : "");
+		}
+		fprintf(f, "    ] }");
+	}
+	fprintf(f, "\n  ]\n}\n");
+	fclose(f);
+}
+
 static void writeTimelineJson(const char *path, const timeline_t *t)
 {
 	FILE *f = fopen(path, "w");
@@ -1863,6 +1921,9 @@ int extractMain(int argc, char **argv)
 	// --- text + json
 	joinPath(path, sizeof (path), o.outDir, "patterns.txt");
 	writePatternsText(path);
+
+	joinPath(path, sizeof (path), o.outDir, "patterns.json");
+	writePatternsJson(path);
 
 	joinPath(path, sizeof (path), o.outDir, "timeline.json");
 	writeTimelineJson(path, &t);

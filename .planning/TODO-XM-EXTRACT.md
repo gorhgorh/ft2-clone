@@ -11,4 +11,5 @@ Deferred items from 2026-10-09 planning. See `PLAN-XM-EXTRACT.md`.
 - [ ] Read amp/interpolation from the user's FT2.CFG instead of FT2 defaults (`--amp 10`, sinc8).
 - [ ] Output size: ~23 MB/min per float stereo stem. Options: per-stem trimming of leading/trailing silence with offset in meta.json, or mono stems when pan is centered.
 - [ ] Tone-portamento notes (3xx, 5xx, vol Fx) are emitted as new MIDI notes; FT2 slides the pitch without retrigger.
-- [ ] Pattern-level export (`--order A-B`, `--pattern N`, `--tail`) and small GUI for preview + export by pattern / channel / instrument. See `PLAN-XM-EXTRACT-GUI.md`.
+- [x] Pattern-level export (`--order A-B`, `--pattern N`, `--tail`, `--carry-voices`) done 2026-10-09.
+- [ ] Small GUI (`tools/fastxtract`, Electron) for preview + export by pattern / channel / instrument. See `PLAN-XM-EXTRACT-GUI.md`.

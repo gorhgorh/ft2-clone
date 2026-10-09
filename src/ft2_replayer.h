@@ -330,6 +330,7 @@ void resetVolumes(channel_t *ch);
 void triggerInstrument(channel_t *ch);
 void tickReplayer(void); // periodically called from audio callback
 void resetChannels(void);
+void resetReplayerState(void);
 bool patternEmpty(uint16_t pattNum);
 int16_t getUsedSamples(int16_t smpNum);
 int16_t getRealUsedSamples(int16_t smpNum);
@@ -350,6 +351,7 @@ void pbRecPtn(void);
 // ft2_replayer.c
 extern int8_t playMode;
 extern bool songPlaying, audioPaused, musicPaused;
+extern uint32_t replayerPatternEnds;
 extern volatile bool replayerBusy;
 extern const uint16_t *note2PeriodLUT;
 extern int16_t patternNumRows[MAX_PATTERNS];

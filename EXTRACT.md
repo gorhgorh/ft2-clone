@@ -27,6 +27,10 @@ Needs SDL2 (Homebrew `sdl2` on macOS is fine; the stock `make-macos.sh` expects 
 | `--stems <list>` | all | comma list of `channels`, `instruments`, `pairs`, `mix` |
 | `--rows-per-beat <n>` | 24/speed | MIDI grid (speed 6 = 4, speed 3 = 8) |
 | `--max-seconds <s>` | 1800 | safety cap for songs that loop forever |
+| `--order A[-B]` | whole song | render only order positions A..B (0-based), see below |
+| `--pattern N` | | render pattern N alone from a clean state, like FT2 play-pattern |
+| `--tail <s>` | 2 (0 for whole song) | ring-out after the range, last 100 ms faded |
+| `--carry-voices` | off | `--order`: keep notes ringing from before A instead of cutting them |
 | `--no-stems` / `--no-samples` / `--no-midi` | | skip a family |
 | `--all-samples` | | also write samples of instruments the song never plays |
 
@@ -50,6 +54,21 @@ All stems are stereo, full song length, same gain. They are mixed in the same pa
 
 Stem size: 48 kHz float stereo is about 23 MB per minute per stem. A 4-minute song with 100 pairs is 10 GB; use `--stems channels,instruments,mix` or `--bits 16` when pairs are not needed.
 
+## Ranges: one pattern or a few orders
+
+```sh
+./release/other/ft2-clone --extract mods/SONG.XM out/song --order 4-5   # -> out/song/orders/o04-o05/
+./release/other/ft2-clone --extract mods/SONG.XM out/song --pattern 12  # -> out/song/patterns/p12/
+```
+
+Same layout as a full export (stems, samples, midi, meta.json, timeline.json), frame 0 = first row of the range.
+
+`--order` plays the song silently from the start up to A, so speed, BPM, global volume and the instrument latched on each channel are the real in-song ones. Notes still ringing from before A are cut at frame 0 (`--carry-voices` keeps them; with it, `--order 4-5` is sample-identical to the matching slice of the full render). The range ends when the next order starts, when a jump leaves A..B, or on `F00`.
+
+`--pattern` plays the pattern once from a clean state like FT2's play-pattern: initial speed/BPM, no latched instruments, so notes without an instrument column are silent, exactly as in FT2.
+
+After the range, no more rows are read and the voices ring for `--tail` seconds (envelopes and fadeout keep running). `meta.json` has a `range` block (`rangeFrames`, `rangeSeconds`, `rows`, `tailSeconds`) and `tempo` reflects the speed/BPM at the start of the range. MIDI notes end at the range end, not in the tail.
+
 ## MIDI timing
 
 Notes are placed by absolute time at one tempo: `24 * BPM / (rowsPerBeat * speed)`, so speed 3 / BPM 205 gives 205 BPM with 8 rows per beat. Set the DAW project to the `tempo.bpm` value in `meta.json` and the MIDI lines up with the stems for the whole song, including after speed or BPM changes (there is no tempo map in the file). Velocity comes from the volume column, or the sample default volume. A note ends at the next note, key-off or `ECx` on the same channel, else at song end. MIDI note = XM note + 11 (C-4 is 60).
@@ -60,5 +79,6 @@ Notes are placed by absolute time at one tempo: `24 * BPM / (rowsPerBeat * speed
 - `src/ft2_audio.c`: `voice_t.instrTag` (set on trigger from the channel's latched instrument pointer), `mixReplayerTickToStems()` mixes each voice alone and hands it to a sink, `allocateMixBuffers()`.
 - `src/ft2_module_loader.c`: `loadModuleHeadless()`, `setupLoadedModuleCore()` (the GUI-free half of module setup).
 - `src/ft2_main.c`: two-line hook before SDL video init.
+- `src/ft2_replayer.c`: `replayerPatternEnds` counter, bumped when a pattern ends (wrap, `Dxx`, `Bxx`); the range modes stop on it.
 
 Deferred ideas live in `.planning/TODO-XM-EXTRACT.md`.

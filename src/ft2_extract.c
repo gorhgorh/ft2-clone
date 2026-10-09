@@ -56,7 +56,27 @@ typedef struct extractOpts_t
 	bool stems, samples, midi;
 	bool allSamples; // also write samples of instruments never played in the song
 	bool stemPairs, stemChannels, stemInstruments, stemMix;
+	int16_t orderFrom, orderTo; // -1 = whole song
+	int16_t patternNum; // -1 = not pattern mode
+	double tailSeconds; // < 0 = auto (0 for whole song, 2 for ranges)
+	bool carryVoices; // keep notes ringing from before an order range instead of cutting them
 } extractOpts_t;
+
+typedef enum rangeMode_t { RANGE_SONG, RANGE_ORDERS, RANGE_PATTERN } rangeMode_t;
+
+static rangeMode_t rangeMode(const extractOpts_t *o)
+{
+	if (o->patternNum >= 0) return RANGE_PATTERN;
+	if (o->orderFrom >= 0) return RANGE_ORDERS;
+	return RANGE_SONG;
+}
+
+static double tailSeconds(const extractOpts_t *o)
+{
+	if (o->tailSeconds >= 0.0)
+		return o->tailSeconds;
+	return (rangeMode(o) == RANGE_SONG) ? 0.0 : 2.0;
+}
 
 static void printUsage(void)
 {
@@ -69,6 +89,12 @@ static void printUsage(void)
 		"  --interp <mode>      none|linear|quadratic|cubic|sinc8|sinc16 (default sinc8)\n"
 		"  --rows-per-beat <n>  MIDI grid, default 24/speed (speed 6 = 4, speed 3 = 8)\n"
 		"  --max-seconds <s>    stop rendering after s seconds (default 1800)\n"
+		"  --order <A>[-<B>]    only order positions A..B (0-based), with the song state at A;\n"
+		"                       output goes to <outdir>/orders/oAA-oBB/\n"
+		"  --pattern <N>        only pattern N, alone, from a clean state (FT2 play-pattern);\n"
+		"                       output goes to <outdir>/patterns/pNN/\n"
+		"  --tail <s>           seconds of ring-out after the range (default 2, 0 for whole song)\n"
+		"  --carry-voices       --order: keep notes ringing from before A instead of cutting them\n"
 		"  --no-stems           skip audio stems\n"
 		"  --no-samples         skip sample WAVs\n"
 		"  --all-samples        also write samples of instruments the song never plays\n"
@@ -106,6 +132,8 @@ static bool parseOpts(int argc, char **argv, extractOpts_t *o)
 	o->maxSeconds = 1800.0;
 	o->stems = o->samples = o->midi = true;
 	o->stemPairs = o->stemChannels = o->stemInstruments = o->stemMix = true;
+	o->orderFrom = o->orderTo = o->patternNum = -1;
+	o->tailSeconds = -1.0;
 
 	if (argc < 4)
 		return false;
@@ -142,6 +170,27 @@ static bool parseOpts(int argc, char **argv, extractOpts_t *o)
 		}
 		else if (v != NULL && strcmp(a, "--rows-per-beat") == 0) { o->rowsPerBeat = atoi(v); i++; }
 		else if (v != NULL && strcmp(a, "--max-seconds") == 0) { o->maxSeconds = atof(v); i++; }
+		else if (v != NULL && strcmp(a, "--tail") == 0) { o->tailSeconds = atof(v); i++; }
+		else if (strcmp(a, "--carry-voices") == 0) o->carryVoices = true;
+		else if (v != NULL && strcmp(a, "--pattern") == 0) { o->patternNum = (int16_t)atoi(v); i++; }
+		else if (v != NULL && strcmp(a, "--order") == 0)
+		{
+			int from = -1, to = -1;
+			const int got = sscanf(v, "%d-%d", &from, &to);
+			if (got < 1 || from < 0)
+			{
+				fprintf(stderr, "--order: expected A or A-B, got \"%s\"\n", v);
+				return false;
+			}
+			o->orderFrom = (int16_t)from;
+			o->orderTo = (int16_t)((got == 2) ? to : from);
+			if (o->orderTo < o->orderFrom)
+			{
+				fprintf(stderr, "--order: B must be >= A\n");
+				return false;
+			}
+			i++;
+		}
 		else if (v != NULL && strcmp(a, "--interp") == 0)
 		{
 			if (!parseInterpolation(v, &o->interpolation))
@@ -162,6 +211,15 @@ static bool parseOpts(int argc, char **argv, extractOpts_t *o)
 		return false;
 
 	if (o->amp < 1 || o->amp > 32)
+		return false;
+
+	if (o->patternNum >= 0 && o->orderFrom >= 0)
+	{
+		fprintf(stderr, "--order and --pattern are exclusive\n");
+		return false;
+	}
+
+	if (o->patternNum >= MAX_PATTERNS)
 		return false;
 
 	return true;
@@ -295,6 +353,17 @@ static void pairStemName(char *out, size_t n, int32_t ch, int32_t ins)
 	snprintf(out, n, "ch%02d-i%03d-%s.wav", ch + 1, ins, name);
 }
 
+// sub directory of <outdir> for a range render: "orders/o05-o07", "patterns/p12", "" for the whole song
+static void rangeDirName(char *out, size_t n, const extractOpts_t *o)
+{
+	switch (rangeMode(o))
+	{
+		case RANGE_ORDERS: snprintf(out, n, "orders/o%02d-o%02d", o->orderFrom, o->orderTo); break;
+		case RANGE_PATTERN: snprintf(out, n, "patterns/p%02d", o->patternNum); break;
+		default: out[0] = '\0'; break;
+	}
+}
+
 static void sampleFileName(char *out, size_t n, int32_t ins, int32_t smp, const char *smpName)
 {
 	char name[64];
@@ -403,6 +472,7 @@ typedef struct stemSet_t
 
 	uint32_t maxTickFrames, tickFrames, rate;
 	uint64_t tickStartFrame;
+	uint64_t fadeStartFrame, fadeEndFrame; // linear fade-out applied to every stem (0,0 = none), used at the end of the tail
 	uint8_t bits;
 	char dirPairs[PATH_MAX], dirChannels[PATH_MAX], dirInstruments[PATH_MAX], dirStems[PATH_MAX];
 	bool wantPairs, wantChannels, wantInstruments;
@@ -542,6 +612,19 @@ static void flushStems(stemSet_t *set)
 		if (s->framesWritten < set->tickStartFrame)
 			writeSilence(set, s, set->tickStartFrame - s->framesWritten);
 
+		if (set->fadeEndFrame > 0 && set->tickStartFrame + set->tickFrames > set->fadeStartFrame)
+		{
+			// same gain curve on every stem, so the stems still sum to the mix
+			const double fadeLen = (double)(set->fadeEndFrame - set->fadeStartFrame);
+			for (uint32_t j = 0; j < set->tickFrames; j++)
+			{
+				const uint64_t frame = set->tickStartFrame + j;
+				const double gain = (frame < set->fadeStartFrame) ? 1.0 : (frame >= set->fadeEndFrame) ? 0.0 : 1.0 - (frame - set->fadeStartFrame) / fadeLen;
+				s->fTick[j*2+0] *= (float)gain;
+				s->fTick[j*2+1] *= (float)gain;
+			}
+		}
+
 		writeStemFrames(set, s, s->fTick, set->tickFrames);
 		memset(s->fTick, 0, set->tickFrames * 2 * sizeof (float));
 		s->dirty = false;
@@ -637,7 +720,8 @@ typedef struct timeline_t
 {
 	rowEvent_t *rows;
 	int32_t numRows;
-	uint64_t totalFrames;
+	uint64_t totalFrames; // range + tail
+	uint64_t rangeEndFrame; // where the last pattern row ends (tail starts here)
 	uint32_t rate;
 	bool capped;
 } timeline_t;
@@ -676,11 +760,25 @@ static bool endOfTune(int16_t endSongPos)
 
 static void startHeadlessPlayback(const extractOpts_t *o)
 {
-	setSongPos(0, 0, RESET_SONG_TICK);
-	playMode = PLAYMODE_SONG;
+	if (rangeMode(o) == RANGE_PATTERN)
+	{
+		// like FT2 "play pattern": no order list involved
+		song.songPos = 0;
+		song.pattNum = o->patternNum;
+		song.currNumRows = patternNumRows[o->patternNum];
+		song.row = 0;
+		song.tick = 1;
+		playMode = PLAYMODE_PATT;
+	}
+	else
+	{
+		setSongPos(0, 0, RESET_SONG_TICK);
+		playMode = PLAYMODE_SONG;
+	}
 	songPlaying = true;
 
 	resetChannels();
+	resetReplayerState();
 	setNewAudioFreq(o->rate);
 	setAudioAmp(o->amp, 256, o->bits == 32);
 
@@ -700,28 +798,118 @@ static void stopHeadlessPlayback(void)
 		song.speed = 6;
 }
 
-// runs the replayer over the whole song. If set != NULL, audio is routed into stems.
+// kills every mixer voice without touching the replayer channel state (latched instruments etc.)
+static void killVoices(void)
+{
+	for (int32_t i = 0; i < MAX_CHANNELS; i++)
+		stopVoice(i);
+}
+
+// true on a tick where the replayer is about to read a new pattern row
+static bool rowReadTick(void)
+{
+	return song.tick == 1 && song.pattDelTime2 == 0;
+}
+
+// true once the selected range has played out (checked on a row-read tick, before the row is read)
+static bool rangeDone(const extractOpts_t *o, int16_t endSongPos, uint32_t patternEndsAtStart)
+{
+	switch (rangeMode(o))
+	{
+		case RANGE_ORDERS:
+			return song.speed == 0 || (rowReadTick()
+				&& (replayerPatternEnds - patternEndsAtStart >= (uint32_t)(o->orderTo - o->orderFrom + 1)
+				|| song.songPos < o->orderFrom || song.songPos > o->orderTo));
+
+		case RANGE_PATTERN:
+			return song.speed == 0 || (rowReadTick() && replayerPatternEnds - patternEndsAtStart >= 1);
+
+		default:
+			return endOfTune(endSongPos);
+	}
+}
+
+/*
+** Runs the replayer over the whole song, an order range or one pattern.
+** If set != NULL, audio is routed into stems.
+**
+** Order ranges pre-roll the song silently from order 0 up to A so speed/BPM,
+** global volume and latched instruments are the real in-song ones. Then
+** ringing voices are cut (unless --carry-voices) and capture starts at frame 0.
+** After the range, songPlaying is cleared so no more rows are read while the
+** voices ring out for the tail.
+*/
 static bool renderSong(const extractOpts_t *o, stemSet_t *set, timeline_t *t)
 {
+	const rangeMode_t mode = rangeMode(o);
 	const int16_t endSongPos = song.songLength - 1;
 	const uint64_t maxFrames = (uint64_t)(o->maxSeconds * o->rate);
-	uint64_t frame = 0, tickSamplesFrac = 0;
+	const uint64_t tailFrames = (uint64_t)(tailSeconds(o) * o->rate);
+	uint64_t frame = 0, preRollFrames = 0, tailLeft = 0, tickSamplesFrac = 0;
+	uint32_t patternEndsAtStart = 0;
+	bool capturing = (mode != RANGE_ORDERS) || (o->orderFrom == 0);
+	bool inTail = false;
 
 	startHeadlessPlayback(o);
+	patternEndsAtStart = replayerPatternEnds;
+	t->rangeEndFrame = 0;
 
 	for (;;)
 	{
-		if (endOfTune(endSongPos))
-			break;
-
-		if (frame >= maxFrames)
+		if (!capturing)
 		{
-			t->capped = true;
-			break;
+			// pre-roll: wait for the first row of order A
+			if (rowReadTick() && song.songPos == o->orderFrom)
+			{
+				capturing = true;
+				patternEndsAtStart = replayerPatternEnds;
+				editor.wavReachedEndFlag = false;
+				if (!o->carryVoices)
+					killVoices();
+			}
+			else if (endOfTune(endSongPos) || preRollFrames >= maxFrames)
+			{
+				fprintf(stderr, "--order: position %d is never reached when playing the song\n", o->orderFrom);
+				stopHeadlessPlayback();
+				return false;
+			}
 		}
 
-		if (song.tick == 1 && song.pattDelTime2 == 0)
-			timelinePush(t, frame); // this tick reads a new pattern row
+		if (capturing && !inTail)
+		{
+			if (rangeDone(o, endSongPos, patternEndsAtStart))
+			{
+				t->rangeEndFrame = frame;
+				if (tailFrames == 0)
+					break;
+
+				inTail = true;
+				tailLeft = tailFrames;
+				songPlaying = false; // stop reading rows, keep voices + envelopes running
+
+				if (set != NULL)
+				{
+					// fade the last 100 ms of the tail so looping samples don't end on a click
+					const uint64_t fadeFrames = (tailFrames < o->rate / 10) ? tailFrames : o->rate / 10;
+					set->fadeEndFrame = frame + tailFrames;
+					set->fadeStartFrame = set->fadeEndFrame - fadeFrames;
+				}
+			}
+			else if (frame >= maxFrames)
+			{
+				t->capped = true;
+				t->rangeEndFrame = frame;
+				break;
+			}
+			else if (rowReadTick())
+			{
+				timelinePush(t, frame); // this tick reads a new pattern row
+			}
+		}
+		else if (inTail && tailLeft == 0)
+		{
+			break;
+		}
 
 		dump_TickReplayer();
 
@@ -731,6 +919,20 @@ static bool renderSong(const extractOpts_t *o, stemSet_t *set, timeline_t *t)
 		{
 			tickSamplesFrac &= BPM_FRAC_MASK;
 			tickSamples++;
+		}
+
+		if (!capturing)
+		{
+			mixReplayerTickToStems(tickSamples, NULL, NULL); // advance voices, drop audio
+			preRollFrames += tickSamples;
+			continue;
+		}
+
+		if (inTail)
+		{
+			if (tickSamples > tailLeft)
+				tickSamples = (uint32_t)tailLeft;
+			tailLeft -= tickSamples;
 		}
 
 		if (set != NULL)
@@ -952,7 +1154,7 @@ static void buildNoteEvents(const timeline_t *t, noteList_t *out)
 
 			noteEvent_t ev;
 			ev.startFrame = e->frame;
-			ev.endFrame = t->totalFrames;
+			ev.endFrame = t->rangeEndFrame;
 			ev.ch = (uint8_t)ch;
 			ev.note = (uint8_t)CLAMP(p->note + 11, 0, 127); // C-4 (49) -> MIDI 60
 			ev.vel = cellVelocity(p, lastInstr[ch]);
@@ -1251,6 +1453,10 @@ static void writeTimelineJson(const char *path, const timeline_t *t)
 	fclose(f);
 }
 
+// speed/BPM in force when the rendered range started (falls back to the song header)
+static int32_t rangeStartSpeed(const timeline_t *t) { return t->numRows > 0 ? t->rows[0].speed : song.initialSpeed; }
+static int32_t rangeStartBPM(const timeline_t *t) { return t->numRows > 0 ? t->rows[0].BPM : song.BPM; }
+
 static int32_t autoRowsPerBeat(int32_t speed)
 {
 	if (speed > 0 && 24 % speed == 0)
@@ -1300,7 +1506,9 @@ static void writeMetaJson(const char *path, const extractOpts_t *o, const timeli
 	if (f == NULL)
 		return;
 
-	const double tempo = derivedTempo(song.BPM, song.initialSpeed, rowsPerBeat);
+	const int32_t speed = rangeStartSpeed(t), BPM = rangeStartBPM(t);
+	const double tempo = derivedTempo(BPM, speed, rowsPerBeat);
+	static const char *rangeModeNames[] = { "song", "orders", "pattern" };
 
 	fprintf(f, "{\n");
 	fprintf(f, "  \"file\": "); fputJsonString(f, o->modPath); fprintf(f, ",\n");
@@ -1311,8 +1519,11 @@ static void writeMetaJson(const char *path, const extractOpts_t *o, const timeli
 	fprintf(f, "  \"speed\": %d,\n", song.initialSpeed);
 	fprintf(f, "  \"bpm\": %d,\n", song.BPM);
 	fprintf(f, "  \"linearPeriods\": %s,\n", audio.linearPeriodsFlag ? "true" : "false");
-	fprintf(f, "  \"tempo\": { \"ticksPerSecond\": %.6f, \"msPerRow\": %.6f, \"rowsPerBeat\": %d, \"bpm\": %.6f },\n",
-		song.BPM / 2.5, song.initialSpeed * 2500.0 / song.BPM, rowsPerBeat, tempo);
+	fprintf(f, "  \"tempo\": { \"speed\": %d, \"xmBpm\": %d, \"ticksPerSecond\": %.6f, \"msPerRow\": %.6f, \"rowsPerBeat\": %d, \"bpm\": %.6f },\n",
+		speed, BPM, BPM / 2.5, speed * 2500.0 / BPM, rowsPerBeat, tempo);
+	fprintf(f, "  \"range\": { \"mode\": \"%s\", \"orderFrom\": %d, \"orderTo\": %d, \"pattern\": %d, \"carryVoices\": %s, \"rows\": %d, \"rangeFrames\": %llu, \"rangeSeconds\": %.6f, \"tailSeconds\": %.3f },\n",
+		rangeModeNames[rangeMode(o)], o->orderFrom, o->orderTo, o->patternNum, o->carryVoices ? "true" : "false",
+		t->numRows, (unsigned long long)t->rangeEndFrame, (double)t->rangeEndFrame / o->rate, tailSeconds(o));
 	fprintf(f, "  \"render\": { \"rate\": %u, \"bits\": %d, \"amp\": %d, \"interpolation\": %d, \"durationSeconds\": %.6f, \"totalFrames\": %llu, \"capped\": %s, \"numStems\": %d },\n",
 		o->rate, o->bits, o->amp, o->interpolation, (double)t->totalFrames / o->rate, (unsigned long long)t->totalFrames,
 		t->capped ? "true" : "false", numStems);
@@ -1503,10 +1714,12 @@ int extractMain(int argc, char **argv)
 
 	raiseOpenFileLimit();
 
-	if (!makeDir(o.outDir))
+	char rangeDir[64], outDir[PATH_MAX];
+	rangeDirName(rangeDir, sizeof (rangeDir), &o);
+	if (rangeDir[0] != '\0')
 	{
-		fprintf(stderr, "can't create output directory \"%s\"\n", o.outDir);
-		return 1;
+		joinPath(outDir, sizeof (outDir), o.outDir, rangeDir);
+		o.outDir = outDir;
 	}
 
 	if (!setupHeadlessEngine(&o))
@@ -1517,6 +1730,18 @@ int extractMain(int argc, char **argv)
 
 	fprintf(stderr, "loaded \"%s\": %d channels, %d orders, speed %d, BPM %d\n",
 		song.name, song.numChannels, song.songLength, song.initialSpeed, song.BPM);
+
+	if (rangeMode(&o) == RANGE_ORDERS && o.orderTo >= song.songLength)
+	{
+		fprintf(stderr, "--order: song has %d positions (0..%d)\n", song.songLength, song.songLength - 1);
+		return 1;
+	}
+
+	if (!makeDir(o.outDir))
+	{
+		fprintf(stderr, "can't create output directory \"%s\"\n", o.outDir);
+		return 1;
+	}
 
 	// --- render pass (always runs: the timeline drives MIDI and metadata)
 	timeline_t t;
@@ -1537,7 +1762,7 @@ int extractMain(int argc, char **argv)
 		fprintf(stderr, "rendering stems at %u Hz / %d-bit, amp %d...\n", o.rate, o.bits, o.amp);
 		if (!renderSong(&o, &set, &t))
 		{
-			fprintf(stderr, "render failed (I/O error)\n");
+			fprintf(stderr, "render failed\n");
 			return 1;
 		}
 
@@ -1563,8 +1788,9 @@ int extractMain(int argc, char **argv)
 			return 1;
 	}
 
-	fprintf(stderr, "song length: %.2f s, %d rows%s, %d stems kept\n",
-		(double)t.totalFrames / o.rate, t.numRows, t.capped ? " (capped by --max-seconds)" : "", numStems);
+	fprintf(stderr, "rendered: %.2f s (%.2f s + %.2f s tail), %d rows%s, %d stems kept\n",
+		(double)t.totalFrames / o.rate, (double)t.rangeEndFrame / o.rate, (double)(t.totalFrames - t.rangeEndFrame) / o.rate,
+		t.numRows, t.capped ? " (capped by --max-seconds)" : "", numStems);
 
 	// --- notes + usage
 	noteList_t notes = { NULL, 0, 0 };
@@ -1573,7 +1799,7 @@ int extractMain(int argc, char **argv)
 	usage_t usage;
 	countUsage(&notes, &usage);
 
-	const int32_t rowsPerBeat = (o.rowsPerBeat > 0) ? o.rowsPerBeat : autoRowsPerBeat(song.initialSpeed);
+	const int32_t rowsPerBeat = (o.rowsPerBeat > 0) ? o.rowsPerBeat : autoRowsPerBeat(rangeStartSpeed(&t));
 
 	// --- samples
 	if (o.samples)
@@ -1616,7 +1842,7 @@ int extractMain(int argc, char **argv)
 
 		midiTiming_t mt;
 		mt.rate = o.rate;
-		mt.tempo = derivedTempo(song.BPM, song.initialSpeed, rowsPerBeat);
+		mt.tempo = derivedTempo(rangeStartBPM(&t), rangeStartSpeed(&t), rowsPerBeat);
 
 		int32_t written = 0;
 		for (int32_t ch = 0; ch < song.numChannels; ch++)

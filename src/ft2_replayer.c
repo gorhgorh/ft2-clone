@@ -42,6 +42,7 @@ typedef void (*efxRoutine)(channel_t *ch, uint8_t param);
 // globally accessed
 int8_t playMode = 0;
 bool songPlaying = false, audioPaused = false, musicPaused = false;
+uint32_t replayerPatternEnds = 0; // bumps when a pattern ends (wrap, Dxx, Bxx); used by --extract
 volatile bool replayerBusy = false;
 const uint16_t *note2PeriodLUT = NULL;
 int16_t patternNumRows[MAX_PATTERNS];
@@ -2314,6 +2315,7 @@ static void getNextPos(void)
 
 	if (song.row >= song.currNumRows || song.posJumpFlag)
 	{
+		replayerPatternEnds++;
 		song.row = song.pBreakPos;
 		song.pBreakPos = 0;
 		song.posJumpFlag = false;

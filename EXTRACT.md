@@ -28,6 +28,7 @@ Needs SDL2 (Homebrew `sdl2` on macOS is fine; the stock `make-macos.sh` expects 
 | `--rows-per-beat <n>` | 24/speed | MIDI grid (speed 6 = 4, speed 3 = 8) |
 | `--max-seconds <s>` | 1800 | safety cap for songs that loop forever |
 | `--no-stems` / `--no-samples` / `--no-midi` | | skip a family |
+| `--all-samples` | | also write samples of instruments the song never plays |
 
 ## Output
 
@@ -40,12 +41,12 @@ out/song/
   stems/channels/ch-NN.wav            one per channel
   stems/instruments/iNNN-name.wav     one per instrument, across all channels
   stems/chan-instr/chNN-iNNN-name.wav one per (channel, instrument) pair
-  samples/iNNN-sSS-name.wav           raw samples, mono PCM, loop points in `smpl`, name in `INAM`
+  samples/iNNN-sSS-name.wav           raw samples, mono PCM, loop points in `smpl`, name in `INAM`; only instruments the song plays
   midi/ch-NN.mid                      notes of one channel
   midi/iNNN-name.mid                  notes of one instrument, one track per channel
 ```
 
-All stems are stereo, full song length, same gain. They are mixed in the same pass, so channel stems, instrument stems and pair stems each sum exactly to `mix.wav`. Silent stems are deleted. Unused channels have no stem.
+All stems are stereo, full song length, same gain. They are mixed in the same pass, so channel stems, instrument stems and pair stems each sum exactly to `mix.wav`. Silent stems are deleted. Unused channels have no stem. Instruments the song never plays get no stem, no MIDI and no sample file (`--all-samples` keeps their samples); `meta.json` still lists them with `used: false`.
 
 Stem size: 48 kHz float stereo is about 23 MB per minute per stem. A 4-minute song with 100 pairs is 10 GB; use `--stems channels,instruments,mix` or `--bits 16` when pairs are not needed.
 

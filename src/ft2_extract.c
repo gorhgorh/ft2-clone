@@ -54,6 +54,7 @@ typedef struct extractOpts_t
 	int32_t rowsPerBeat; // 0 = auto
 	double maxSeconds;
 	bool stems, samples, midi;
+	bool allSamples; // also write samples of instruments never played in the song
 	bool stemPairs, stemChannels, stemInstruments, stemMix;
 } extractOpts_t;
 
@@ -70,6 +71,7 @@ static void printUsage(void)
 		"  --max-seconds <s>    stop rendering after s seconds (default 1800)\n"
 		"  --no-stems           skip audio stems\n"
 		"  --no-samples         skip sample WAVs\n"
+		"  --all-samples        also write samples of instruments the song never plays\n"
 		"  --no-midi            skip MIDI files\n");
 }
 
@@ -118,6 +120,7 @@ static bool parseOpts(int argc, char **argv, extractOpts_t *o)
 
 		if (strcmp(a, "--no-stems") == 0) o->stems = false;
 		else if (strcmp(a, "--no-samples") == 0) o->samples = false;
+		else if (strcmp(a, "--all-samples") == 0) o->allSamples = true;
 		else if (strcmp(a, "--no-midi") == 0) o->midi = false;
 		else if (v != NULL && strcmp(a, "--rate") == 0) { o->rate = (uint32_t)atoi(v); i++; }
 		else if (v != NULL && strcmp(a, "--bits") == 0) { o->bits = (uint8_t)atoi(v); i++; }
@@ -1273,6 +1276,23 @@ static void countUsage(const noteList_t *notes, usage_t *u)
 		u->pairNotes[notes->v[i].ch][notes->v[i].instr]++;
 }
 
+// true if at least one note of instrument i is played in the song
+static bool instrUsed(const usage_t *u, int32_t i)
+{
+	for (int32_t ch = 0; ch < song.numChannels; ch++)
+	{
+		if (u->pairNotes[ch][i] > 0)
+			return true;
+	}
+	return false;
+}
+
+// true if the sample WAVs of instrument i get written
+static bool instrSamplesExported(const extractOpts_t *o, const usage_t *u, int32_t i)
+{
+	return o->samples && (o->allSamples || instrUsed(u, i));
+}
+
 static void writeMetaJson(const char *path, const extractOpts_t *o, const timeline_t *t, const usage_t *u,
 	int32_t rowsPerBeat, const char *stemIndexJson, int32_t numStems)
 {
@@ -1341,8 +1361,8 @@ static void writeMetaJson(const char *path, const extractOpts_t *o, const timeli
 			continue;
 		}
 
-		fprintf(f, ", \"fadeout\": %d, \"volEnv\": %s, \"panEnv\": %s, \"autoVib\": { \"type\": %d, \"sweep\": %d, \"depth\": %d, \"rate\": %d },\n",
-			ins->fadeout, (ins->volEnvFlags & 1) ? "true" : "false", (ins->panEnvFlags & 1) ? "true" : "false",
+		fprintf(f, ", \"used\": %s, \"fadeout\": %d, \"volEnv\": %s, \"panEnv\": %s, \"autoVib\": { \"type\": %d, \"sweep\": %d, \"depth\": %d, \"rate\": %d },\n",
+			instrUsed(u, i) ? "true" : "false", ins->fadeout, (ins->volEnvFlags & 1) ? "true" : "false", (ins->panEnvFlags & 1) ? "true" : "false",
 			ins->autoVibType, ins->autoVibSweep, ins->autoVibDepth, ins->autoVibRate);
 
 		fprintf(f, "      \"usedOnChannels\": [");
@@ -1369,7 +1389,11 @@ static void writeMetaJson(const char *path, const extractOpts_t *o, const timeli
 
 			fprintf(f, "%s\n        { \"num\": %d, \"name\": ", firstSmp ? "" : ",", j + 1);
 			fputJsonString(f, s->name);
-			fprintf(f, ", \"file\": "); fputJsonString(f, fileName);
+			fprintf(f, ", \"file\": ");
+			if (instrSamplesExported(o, u, i))
+				fputJsonString(f, fileName);
+			else
+				fprintf(f, "null");
 			fprintf(f, ", \"length\": %d, \"bits\": %d, \"loopType\": %d, \"loopStart\": %d, \"loopLength\": %d, \"c4hz\": %d, \"finetune\": %d, \"relativeNote\": %d, \"volume\": %d, \"panning\": %d }",
 				s->length, (s->flags & SAMPLE_16BIT) ? 16 : 8, GET_LOOPTYPE(s->flags), s->loopStart, s->loopLength,
 				getSampleC4Hz(s), s->finetune, s->relativeNote, s->volume, s->panning);
@@ -1557,12 +1581,18 @@ int extractMain(int argc, char **argv)
 		joinPath(dir, sizeof (dir), o.outDir, "samples");
 		makeDir(dir);
 
-		int32_t written = 0;
+		int32_t written = 0, skipped = 0;
 		for (int32_t i = 1; i <= MAX_INST; i++)
 		{
 			instr_t *ins = instr[i];
 			if (ins == NULL)
 				continue;
+
+			if (!instrSamplesExported(&o, &usage, i))
+			{
+				skipped++;
+				continue;
+			}
 
 			for (int32_t j = 0; j < MAX_SMP_PER_INST; j++)
 			{
@@ -1575,7 +1605,7 @@ int extractMain(int argc, char **argv)
 				written += writeSampleWav(path, ins, s);
 			}
 		}
-		fprintf(stderr, "samples: %d written\n", written);
+		fprintf(stderr, "samples: %d written, %d unused instruments skipped%s\n", written, skipped, skipped ? " (--all-samples to keep them)" : "");
 	}
 
 	// --- MIDI

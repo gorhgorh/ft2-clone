@@ -107,8 +107,15 @@ Not 1:1. Tick-accurate volume ramps and multi-effect per tick would need M8 tabl
 - Loads and plays. Pitch OK (note offset -13 confirmed). Velocity scale OK. Tempo/groove feel OK.
 - Not yet checked: KIL 00 as key off (hanging notes?), loop clicks, HOP on short patterns, PBN depth.
 
+## Round 2 (2026-10-09, after device test 1)
+
+- `--extract` exports `volEnvelope`, `panEnvelope`, `noteSampleMap` (ft2-clone 40fc9a0).
+- xm2m8: keymap split into one sampler per (instrument, sample), ADSR fit for volume envelope + fadeout (`--env-scale` to calibrate), pitch LFO for auto-vibrato, OFF note (0x80) for key off with envelope, KIL 00 without.
+- Corpus check on 8 modules from `~/SynologyDrive/musik/XMS` (8 to 22 channels): all fit budgets (max 162 phrases). Most dropped effect = volume slides (Axy, 495 in AUTRUCHE).
+
 ## Next
 
 - Device test: pitch base / note offset, velocity scale, KIL as key off, HOP placement, PBN scaling, loop clicks, low sample rates.
-- C export: envelope points, auto-vibrato, sample keymap (then envelope fit + multi-sample split in xm2m8).
+- Volume slides: track channel volume, emit sampler VOL per step once VOL scale confirmed on device.
+- Device check: OFF byte 0x80, env time scale, LFO vibrato units.
 - Transpose-aware phrase dedup; order-range export for big modules.

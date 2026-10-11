@@ -86,7 +86,7 @@ static void printUsage(void)
 		"  --rate <hz>          stem sample rate (default 48000)\n"
 		"  --bits 32|16         stem bit depth, 32 = float (default 32)\n"
 		"  --amp <1..32>        FT2 amp/boost level (default 10 = FT2 default config)\n"
-		"  --stems <list>       comma list of channels,instruments,pairs,mix (default all)\n"
+		"  --stems <list>       comma list of channels,instruments,pairs,mix, or all (default instruments)\n"
 		"  --interp <mode>      none|linear|quadratic|cubic|sinc8|sinc16 (default sinc8)\n"
 		"  --rows-per-beat <n>  MIDI grid, default 24/speed (speed 6 = 4, speed 3 = 8)\n"
 		"  --max-seconds <s>    stop rendering after s seconds (default 1800)\n"
@@ -133,7 +133,7 @@ static bool parseOpts(int argc, char **argv, extractOpts_t *o)
 	o->amp = 10;
 	o->maxSeconds = 1800.0;
 	o->stems = o->samples = o->midi = true;
-	o->stemPairs = o->stemChannels = o->stemInstruments = o->stemMix = true;
+	o->stemInstruments = true; // instrument stems are the deliverable; channels, pairs and mix are opt-in (disk)
 	o->orderFrom = o->orderTo = o->patternNum = -1;
 	o->tailSeconds = -1.0;
 

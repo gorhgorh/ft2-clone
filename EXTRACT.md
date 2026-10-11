@@ -24,7 +24,7 @@ Needs SDL2 (Homebrew `sdl2` on macOS is fine; the stock `make-macos.sh` expects 
 | `--bits 32\|16` | 32 | 32 = float, 16 = PCM (no dither) |
 | `--amp <1..32>` | 10 | FT2 "Amp." boost level, 10 is the FT2 default config |
 | `--interp <mode>` | sinc8 | none, linear, quadratic, cubic, sinc8, sinc16 |
-| `--stems <list>` | all | comma list of `channels`, `instruments`, `pairs`, `mix` |
+| `--stems <list>` | instruments | comma list of `channels`, `instruments`, `pairs`, `mix`, or `all` |
 | `--rows-per-beat <n>` | 24/speed | MIDI grid (speed 6 = 4, speed 3 = 8) |
 | `--max-seconds <s>` | 1800 | safety cap for songs that loop forever |
 | `--order A[-B]` | whole song | render only order positions A..B (0-based), see below |
@@ -55,7 +55,7 @@ out/song/
 
 All stems are stereo, full song length, same gain. They are mixed in the same pass, so channel stems, instrument stems and pair stems each sum exactly to `mix.wav`. Silent stems are deleted. Unused channels have no stem. Instruments the song never plays get no stem, no MIDI and no sample file (`--all-samples` keeps their samples); `meta.json` still lists them with `used: false`.
 
-Stem size: 48 kHz float stereo is about 23 MB per minute per stem. A 4-minute song with 100 pairs is 10 GB; use `--stems channels,instruments,mix` or `--bits 16` when pairs are not needed.
+Stem size: 48 kHz float stereo is about 23 MB per minute per stem, so only instrument stems are written by default. `--stems instruments,channels,mix` adds the rest, `--stems all` includes the (channel, instrument) pairs: a 4-minute song with 100 pairs is 10 GB. `--bits 16` halves everything.
 
 ## Ranges: one pattern or a few orders
 

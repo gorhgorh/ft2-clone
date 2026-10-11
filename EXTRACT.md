@@ -31,6 +31,7 @@ Needs SDL2 (Homebrew `sdl2` on macOS is fine; the stock `make-macos.sh` expects 
 | `--pattern N` | | render pattern N alone from a clean state, like FT2 play-pattern |
 | `--tail <s>` | 2 (0 for whole song) | ring-out after the range, last 100 ms faded |
 | `--carry-voices` | off | `--order`: keep notes ringing from before A instead of cutting them |
+| `--ft2-tempo` | off | FT2/SB16 tick rounding: BPM 170 really plays at 170.21, see below |
 | `--no-stems` / `--no-samples` / `--no-midi` | | skip a family |
 | `--all-samples` | | also write samples of instruments the song never plays |
 
@@ -69,11 +70,15 @@ Same layout as a full export (stems, samples, midi, meta.json, timeline.json), f
 
 `--pattern` plays the pattern once from a clean state like FT2's play-pattern: initial speed/BPM, no latched instruments, so notes without an instrument column are silent, exactly as in FT2.
 
-After the range, no more rows are read and the voices ring for `--tail` seconds (envelopes and fadeout keep running). `meta.json` has a `range` block (`rangeFrames`, `rangeSeconds`, `rows`, `tailSeconds`) and `tempo` reflects the speed/BPM at the start of the range. MIDI notes end at the range end, not in the tail.
+After the range, no more rows are read and the voices ring for `--tail` seconds (envelopes and fadeout keep running). `meta.json` has a `range` block (`rangeFrames`, `rangeSeconds`, `rows`, `tailSeconds`); `tempo` reflects the speed/BPM most rows of the range were played at. MIDI notes end at the range end, not in the tail.
+
+## Tempo precision
+
+A tick is exactly `2.5 / BPM` seconds, so a song at BPM 170 renders at 170.000 and sits on a DAW grid at 170 for its whole length. Real FT2 on a Sound Blaster 16 rounded the samples per tick to a whole number at 44 kHz (48 kHz in its WAV writer), which makes BPM 170 play at 170.213 and BPM 205 at 205.128: the GUI of this clone copies that by default ("more precise BPM" off), and `--ft2-tempo` does the same in the extract. The drift is 0.125 % at 170, about 0.36 s over a 5-minute song, so stems rendered that way only line up with a DAW tempo of 170.21. `meta.json` `tempo.ticksPerSecond` and `tempo.bpm` always give the real values, `tempo.ft2Tempo` says which mode was used.
 
 ## MIDI timing
 
-Notes are placed by absolute time at one tempo: `24 * BPM / (rowsPerBeat * speed)`, so speed 3 / BPM 205 gives 205 BPM with 8 rows per beat. Set the DAW project to the `tempo.bpm` value in `meta.json` and the MIDI lines up with the stems for the whole song, including after speed or BPM changes (there is no tempo map in the file). Velocity comes from the volume column, or the sample default volume. A note ends at the next note, key-off or `ECx` on the same channel, else at song end. MIDI note = XM note + 11 (C-4 is 60).
+Notes are placed by absolute time at one tempo: `24 * BPM / (rowsPerBeat * speed)` taken at the speed/BPM most rows use, so speed 3 / BPM 205 gives 205 BPM with 8 rows per beat (a one-row speed 1 intro does not decide the grid). Set the DAW project to the `tempo.bpm` value in `meta.json` and the MIDI lines up with the stems for the whole song, including after speed or BPM changes (there is no tempo map in the file). Velocity comes from the volume column, or the sample default volume. A note ends at the next note, key-off or `ECx` on the same channel, else at song end. MIDI note = XM note + 11 (C-4 is 60).
 
 ## Internals
 

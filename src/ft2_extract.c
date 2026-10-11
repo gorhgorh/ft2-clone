@@ -60,6 +60,7 @@ typedef struct extractOpts_t
 	int16_t patternNum; // -1 = not pattern mode
 	double tailSeconds; // < 0 = auto (0 for whole song, 2 for ranges)
 	bool carryVoices; // keep notes ringing from before an order range instead of cutting them
+	bool ft2Tempo; // emulate FT2's integer samples-per-tick (BPM 170 plays at 170.21); default is exact BPM
 } extractOpts_t;
 
 typedef enum rangeMode_t { RANGE_SONG, RANGE_ORDERS, RANGE_PATTERN } rangeMode_t;
@@ -95,6 +96,7 @@ static void printUsage(void)
 		"                       output goes to <outdir>/patterns/pNN/\n"
 		"  --tail <s>           seconds of ring-out after the range (default 2, 0 for whole song)\n"
 		"  --carry-voices       --order: keep notes ringing from before A instead of cutting them\n"
+		"  --ft2-tempo          FT2/SB16 tick rounding: BPM 170 really plays at 170.21 (default: exact BPM)\n"
 		"  --no-stems           skip audio stems\n"
 		"  --no-samples         skip sample WAVs\n"
 		"  --all-samples        also write samples of instruments the song never plays\n"
@@ -172,6 +174,7 @@ static bool parseOpts(int argc, char **argv, extractOpts_t *o)
 		else if (v != NULL && strcmp(a, "--max-seconds") == 0) { o->maxSeconds = atof(v); i++; }
 		else if (v != NULL && strcmp(a, "--tail") == 0) { o->tailSeconds = atof(v); i++; }
 		else if (strcmp(a, "--carry-voices") == 0) o->carryVoices = true;
+		else if (strcmp(a, "--ft2-tempo") == 0) o->ft2Tempo = true;
 		else if (v != NULL && strcmp(a, "--pattern") == 0) { o->patternNum = (int16_t)atoi(v); i++; }
 		else if (v != NULL && strcmp(a, "--order") == 0)
 		{
@@ -1534,6 +1537,37 @@ static void writeTimelineJson(const char *path, const timeline_t *t)
 static int32_t rangeStartSpeed(const timeline_t *t) { return t->numRows > 0 ? t->rows[0].speed : song.initialSpeed; }
 static int32_t rangeStartBPM(const timeline_t *t) { return t->numRows > 0 ? t->rows[0].BPM : song.BPM; }
 
+// the (speed, BPM) most rows were played at: a one-row speed 1 intro must not decide the grid or the tempo
+static void dominantTempo(const timeline_t *t, int32_t *speedOut, int32_t *bpmOut)
+{
+	static int32_t count[32][256];
+	memset(count, 0, sizeof (count));
+
+	for (int32_t i = 0; i < t->numRows; i++)
+	{
+		const rowEvent_t *r = &t->rows[i];
+		if (r->speed > 0 && r->speed < 32 && r->BPM > 0 && r->BPM < 256)
+			count[r->speed][r->BPM]++;
+	}
+
+	int32_t bestSpeed = rangeStartSpeed(t), bestBPM = rangeStartBPM(t), best = -1;
+	for (int32_t sp = 1; sp < 32; sp++)
+	{
+		for (int32_t bpm = 1; bpm < 256; bpm++)
+		{
+			if (count[sp][bpm] > best)
+			{
+				best = count[sp][bpm];
+				bestSpeed = sp;
+				bestBPM = bpm;
+			}
+		}
+	}
+
+	*speedOut = bestSpeed;
+	*bpmOut = bestBPM;
+}
+
 static int32_t autoRowsPerBeat(int32_t speed)
 {
 	if (speed > 0 && 24 % speed == 0)
@@ -1542,9 +1576,20 @@ static int32_t autoRowsPerBeat(int32_t speed)
 	return 4;
 }
 
-static double derivedTempo(int32_t BPM, int32_t speed, int32_t rowsPerBeat)
+// ticks per second the engine really runs at: exact 2.5/BPM, or FT2's SB16 rounding at the render rate
+static double engineTicksPerSecond(const extractOpts_t *o, int32_t BPM)
 {
-	return (24.0 * BPM) / ((double)rowsPerBeat * speed);
+	if (!o->ft2Tempo)
+		return BPM / 2.5;
+
+	const uint32_t refRate = (o->rate > 48000) ? 48000 : o->rate; // same cap as calcReplayerVars()
+	return refRate / (double)(((refRate << 1) + (refRate >> 1)) / BPM);
+}
+
+// DAW tempo for the row grid: beats are rowsPerBeat rows long, each row speed ticks
+static double derivedTempo(const extractOpts_t *o, int32_t BPM, int32_t speed, int32_t rowsPerBeat)
+{
+	return (60.0 * engineTicksPerSecond(o, BPM)) / ((double)rowsPerBeat * speed);
 }
 
 typedef struct usage_t
@@ -1595,8 +1640,9 @@ static void writeMetaJson(const char *path, const extractOpts_t *o, const timeli
 	if (f == NULL)
 		return;
 
-	const int32_t speed = rangeStartSpeed(t), BPM = rangeStartBPM(t);
-	const double tempo = derivedTempo(BPM, speed, rowsPerBeat);
+	int32_t speed, BPM;
+	dominantTempo(t, &speed, &BPM);
+	const double tempo = derivedTempo(o, BPM, speed, rowsPerBeat);
 	static const char *rangeModeNames[] = { "song", "orders", "pattern" };
 
 	fprintf(f, "{\n");
@@ -1608,8 +1654,9 @@ static void writeMetaJson(const char *path, const extractOpts_t *o, const timeli
 	fprintf(f, "  \"speed\": %d,\n", song.initialSpeed);
 	fprintf(f, "  \"bpm\": %d,\n", song.BPM);
 	fprintf(f, "  \"linearPeriods\": %s,\n", audio.linearPeriodsFlag ? "true" : "false");
-	fprintf(f, "  \"tempo\": { \"speed\": %d, \"xmBpm\": %d, \"ticksPerSecond\": %.6f, \"msPerRow\": %.6f, \"rowsPerBeat\": %d, \"bpm\": %.6f },\n",
-		speed, BPM, BPM / 2.5, speed * 2500.0 / BPM, rowsPerBeat, tempo);
+	const double ticksPerSecond = engineTicksPerSecond(o, BPM);
+	fprintf(f, "  \"tempo\": { \"speed\": %d, \"xmBpm\": %d, \"ticksPerSecond\": %.6f, \"msPerRow\": %.6f, \"rowsPerBeat\": %d, \"bpm\": %.6f, \"ft2Tempo\": %s },\n",
+		speed, BPM, ticksPerSecond, speed * 1000.0 / ticksPerSecond, rowsPerBeat, tempo, o->ft2Tempo ? "true" : "false");
 	fprintf(f, "  \"range\": { \"mode\": \"%s\", \"orderFrom\": %d, \"orderTo\": %d, \"pattern\": %d, \"carryVoices\": %s, \"rows\": %d, \"rangeFrames\": %llu, \"rangeSeconds\": %.6f, \"tailSeconds\": %.3f },\n",
 		rangeModeNames[rangeMode(o)], o->orderFrom, o->orderTo, o->patternNum, o->carryVoices ? "true" : "false",
 		t->numRows, (unsigned long long)t->rangeEndFrame, (double)t->rangeEndFrame / o->rate, tailSeconds(o));
@@ -1755,7 +1802,9 @@ static bool setupHeadlessEngine(const extractOpts_t *o)
 	config.masterVol = 256;
 	config.boostLevel = o->amp;
 	config.specialFlags = BUFFSIZE_1024 | ((o->bits == 32) ? BITDEPTH_32 : BITDEPTH_16); // volume ramping stays on
-	config.specialFlags2 = 0; // no PRECISE_BPM, same as a default config
+	// PRECISE_BPM: a tick is exactly 2.5/BPM s. Without it the engine copies FT2 on a SB16, whose integer
+	// samples-per-tick make BPM 170 play at 170.21; stems then drift 0.125 % against a DAW grid at 170.
+	config.specialFlags2 = o->ft2Tempo ? 0 : PRECISE_BPM;
 	config.audioFreq = DEFAULT_AUDIO_FREQ;
 
 	audioSetInterpolationType(config.interpolation);
@@ -1897,7 +1946,9 @@ int extractMain(int argc, char **argv)
 	usage_t usage;
 	countUsage(&notes, &usage);
 
-	const int32_t rowsPerBeat = (o.rowsPerBeat > 0) ? o.rowsPerBeat : autoRowsPerBeat(rangeStartSpeed(&t));
+	int32_t mainSpeed, mainBPM;
+	dominantTempo(&t, &mainSpeed, &mainBPM);
+	const int32_t rowsPerBeat = (o.rowsPerBeat > 0) ? o.rowsPerBeat : autoRowsPerBeat(mainSpeed);
 
 	// --- samples
 	if (o.samples)
@@ -1940,7 +1991,7 @@ int extractMain(int argc, char **argv)
 
 		midiTiming_t mt;
 		mt.rate = o.rate;
-		mt.tempo = derivedTempo(rangeStartBPM(&t), rangeStartSpeed(&t), rowsPerBeat);
+		mt.tempo = derivedTempo(&o, mainBPM, mainSpeed, rowsPerBeat);
 
 		int32_t written = 0;
 		for (int32_t ch = 0; ch < song.numChannels; ch++)
